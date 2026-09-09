@@ -1,0 +1,54 @@
+name: Fix Vercel loader fallback
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix-loader:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add loader safety fallback
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('index.html')
+          s = p.read_text(encoding='utf-8')
+          original = s
+
+          if 'loaderFailsafe' not in s:
+              old = '#loader{position:fixed;inset:0;z-index:200;'
+              new = '#loader{animation:loaderFailsafe 3s forwards;position:fixed;inset:0;z-index:200;'
+              if old in s:
+                  s = s.replace(old, new, 1)
+                  marker = '@keyframes load{to{width:100%}}'
+                  css = '@keyframes loaderFailsafe{0%,72%{opacity:1;visibility:visible}100%{opacity:0;visibility:hidden;pointer-events:none}}'
+                  s = s.replace(marker, marker + css, 1)
+
+          if 'window.__loaderSafetyFallback' not in s:
+              anchor = "window.addEventListener('load',()=>{"
+              fallback = "setTimeout(()=>{document.getElementById('loader')?.classList.add('done')},2600);window.__loaderSafetyFallback=true;"
+              if anchor in s:
+                  s = s.replace(anchor, anchor + fallback, 1)
+
+          if s != original:
+              p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Commit patched index
+        run: |
+          if git diff --quiet -- index.html; then
+            echo 'No loader patch needed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html
+          git commit -m 'Fix Vercel preloader fallback'
+          git push
